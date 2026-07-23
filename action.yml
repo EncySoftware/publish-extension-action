@@ -1,0 +1,209 @@
+name: Publish ENCY Extension
+description: >
+  Publish an ENCY extension to the ENCY Extension Store. Takes a ready .nupkg, or packs a
+  build-output folder first with the ENCY pack CLI, then publishes through the store REST API
+  (parse-nupkg -> publish). The token's subject becomes the extension owner.
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  token:
+    description: >
+      Bearer token for the store API (any valid Keycloak token, realm licsys). Pass it from a
+      repo secret. A leading "Bearer " prefix is tolerated.
+    required: true
+  nupkg:
+    description: Path or glob of a ready .nupkg to publish. Mutually exclusive with `folder`.
+    required: false
+    default: ''
+  folder:
+    description: >
+      Build-output folder to pack first. Must be a FLAT build output: <Name>.dll +
+      <Name>.settings.json + package.info.json (+ readme.md for the store card). Use
+      `dotnet build`, not `dotnet publish` - publish drags all SDK dlls into the folder.
+      Requires `pack-cli`.
+    required: false
+    default: ''
+  pack-cli:
+    description: Path to the ENCY pack CLI executable. Required when `folder` is used.
+    required: false
+    default: ''
+  version:
+    description: >
+      Version to stamp into package.info.json before packing (folder mode only). Typically
+      derived from the pushed git tag. Empty = keep the version already in package.info.json.
+    required: false
+    default: ''
+  licensed:
+    description: Publish as a licensed (paid) extension.
+    required: false
+    default: 'false'
+  api-base:
+    description: Store API base URL.
+    required: false
+    default: 'https://dmc.encycam.com/store/api'
+
+outputs:
+  package-id:
+    description: Package id of the published extension
+    value: ${{ steps.publish.outputs.package-id }}
+  version:
+    description: Published version
+    value: ${{ steps.publish.outputs.version }}
+  slug:
+    description: Store card slug
+    value: ${{ steps.publish.outputs.slug }}
+  card-url:
+    description: Store card URL
+    value: ${{ steps.publish.outputs.card-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pack build output
+      id: pack
+      if: ${{ inputs.folder != '' }}
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.folder }}
+        PACK_CLI: ${{ inputs.pack-cli }}
+        STAMP_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -z "$PACK_CLI" ]; then
+          echo "::error::'folder' input requires 'pack-cli' (path to the ENCY pack CLI executable)."
+          exit 1
+        fi
+        if [ ! -e "$PACK_CLI" ]; then
+          echo "::error::pack CLI not found at: $PACK_CLI"
+          exit 1
+        fi
+        if [ ! -d "$FOLDER" ]; then
+          echo "::error::build-output folder not found: $FOLDER"
+          exit 1
+        fi
+        info="$FOLDER/package.info.json"
+        if [ ! -f "$info" ]; then
+          echo "::error::$info is missing. The pack CLI needs it (packageId, version, tags with 'ency-extension')."
+          exit 1
+        fi
+        if [ -n "$STAMP_VERSION" ]; then
+          echo "stamping version $STAMP_VERSION into package.info.json"
+          tmp="$(mktemp)"
+          jq --arg v "$STAMP_VERSION" '.version = $v' "$info" > "$tmp"
+          mv "$tmp" "$info"
+        fi
+        out="$RUNNER_TEMP/ency-pack-$RANDOM"
+        mkdir -p "$out"
+        "$PACK_CLI" pack-library --folder "$FOLDER" --output "$out"
+        # The CLI returns exit 0 even on fatal errors - judge by the artifact, not the exit code.
+        nupkg="$(find "$out" -maxdepth 1 -name '*.nupkg' | head -n 1)"
+        if [ -z "$nupkg" ]; then
+          echo "::error::pack produced no .nupkg. The folder needs a flat dll + *.settings.json + package.info.json."
+          exit 1
+        fi
+        echo "packed: $nupkg"
+        echo "nupkg=$nupkg" >> "$GITHUB_OUTPUT"
+
+    - name: Publish to the store
+      id: publish
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        NUPKG_INPUT: ${{ inputs.nupkg }}
+        NUPKG_PACKED: ${{ steps.pack.outputs.nupkg }}
+        LICENSED: ${{ inputs.licensed }}
+        API: ${{ inputs.api-base }}
+      run: |
+        set -euo pipefail
+        TOKEN="$(printf '%s' "$TOKEN" | sed 's/^[[:space:]]*Bearer[[:space:]]*//')"
+        if [ -z "$TOKEN" ]; then
+          echo "::error::'token' input is empty. Put the store token into a repo secret and pass it in."
+          exit 1
+        fi
+
+        # resolve the .nupkg: packed one wins, otherwise the 'nupkg' input (glob allowed, newest match)
+        nupkg="$NUPKG_PACKED"
+        if [ -z "$nupkg" ]; then
+          if [ -z "$NUPKG_INPUT" ]; then
+            echo "::error::provide either 'nupkg' (ready package) or 'folder' (+ 'pack-cli')."
+            exit 1
+          fi
+          shopt -s nullglob
+          matches=( $NUPKG_INPUT )
+          shopt -u nullglob
+          if [ ${#matches[@]} -eq 0 ]; then
+            echo "::error::no .nupkg matches: $NUPKG_INPUT"
+            exit 1
+          fi
+          nupkg="$(ls -t "${matches[@]}" | head -n 1)"
+        fi
+        echo "publishing: $nupkg"
+
+        call() { # method url curl-args... -> body on stdout; fails on non-2xx with body shown
+          local method="$1" url="$2"; shift 2
+          local body code
+          body="$(mktemp)"
+          code="$(curl -sS -X "$method" "$url" -H "Authorization: Bearer $TOKEN" "$@" -o "$body" -w '%{http_code}')"
+          if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::HTTP $code from $url" >&2
+            cat "$body" >&2
+            rm -f "$body"
+            return 1
+          fi
+          cat "$body"
+          rm -f "$body"
+        }
+
+        echo "== parse-nupkg (stages the original bytes) =="
+        parsed="$(call POST "$API/extensions/parse-nupkg" -F "file=@$nupkg")"
+        pkgId="$(jq -r '.packageId // empty' <<< "$parsed")"
+        ver="$(jq -r '.version // empty' <<< "$parsed")"
+        upl="$(jq -r '.nupkgUploadId // empty' <<< "$parsed")"
+        marker="$(jq -r '.hasMarker' <<< "$parsed")"
+        echo "packageId=$pkgId version=$ver hasMarker=$marker"
+        if [ -z "$pkgId" ] || [ -z "$ver" ] || [ -z "$upl" ]; then
+          echo "::error::parse-nupkg returned incomplete data:"; echo "$parsed"
+          exit 1
+        fi
+        if [ "$marker" != "true" ]; then
+          echo "::error::the package has no 'ency-extension' tag - the catalog will not index it. Add the tag to package.info.json / nuspec and rebuild."
+          exit 1
+        fi
+
+        echo "== publish =="
+        licensed_json=false
+        case "$(echo "$LICENSED" | tr '[:upper:]' '[:lower:]')" in
+          true|1|yes) licensed_json=true ;;
+        esac
+        payload="$(jq -cn --arg p "$pkgId" --arg v "$ver" --arg u "$upl" --argjson l "$licensed_json" \
+                   '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}')"
+        pub="$(call POST "$API/extensions" -H 'Content-Type: application/json' --data-binary "$payload")"
+        slug="$(jq -r '.slug // empty' <<< "$pub")"
+        if [ -z "$slug" ]; then
+          echo "::error::publish returned no slug:"; echo "$pub"
+          exit 1
+        fi
+
+        store_base="${API%/api}"
+        card="$store_base/extension/$slug"
+        echo "PUBLISHED $pkgId $ver"
+        echo "card: $card"
+        {
+          echo "package-id=$pkgId"
+          echo "version=$ver"
+          echo "slug=$slug"
+          echo "card-url=$card"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "### Published to the ENCY Extension Store :rocket:"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Package | \`$pkgId\` |"
+          echo "| Version | \`$ver\` |"
+          echo "| Card | $card |"
+          echo ""
+          echo "_The catalog indexes within a few minutes (reindexer runs every 15 min)._"
+        } >> "$GITHUB_STEP_SUMMARY"
