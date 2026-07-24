@@ -39,6 +39,10 @@ inputs:
     description: Publish as a licensed (paid) extension.
     required: false
     default: 'false'
+  dry-run:
+    description: Pack and validate on the server (parse-nupkg), but skip the publish step.
+    required: false
+    default: 'false'
   api-base:
     description: Store API base URL.
     required: false
@@ -114,6 +118,7 @@ runs:
         NUPKG_INPUT: ${{ inputs.nupkg }}
         NUPKG_PACKED: ${{ steps.pack.outputs.nupkg }}
         LICENSED: ${{ inputs.licensed }}
+        DRY_RUN: ${{ inputs.dry-run }}
         API: ${{ inputs.api-base }}
       run: |
         set -euo pipefail
@@ -170,6 +175,20 @@ runs:
         if [ "$marker" != "true" ]; then
           echo "::error::the package has no 'ency-extension' tag - the catalog will not index it. Add the tag to package.info.json / nuspec and rebuild."
           exit 1
+        fi
+
+        if [ "$(echo "$DRY_RUN" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+          echo "DRY RUN: package is valid ($pkgId $ver), skipping publish."
+          {
+            echo "package-id=$pkgId"
+            echo "version=$ver"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Dry run: package validated, publish skipped :white_check_mark:"
+            echo ""
+            echo "\`$pkgId\` \`$ver\` passed the server-side check (parse-nupkg)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
         fi
 
         echo "== publish =="

@@ -49,6 +49,7 @@ Or with a package you packed yourself:
 | `pack-cli` | with `folder` | — | Path to the ENCY pack CLI executable. |
 | `version` | no | keep file value | Stamped into `package.info.json` before packing (folder mode only). |
 | `licensed` | no | `false` | Publish as a paid extension. |
+| `dry-run` | no | `false` | Pack + server-side validation (parse-nupkg), skip the publish step. |
 | `api-base` | no | `https://dmc.encycam.com/store/api` | Override for test environments. |
 
 \* exactly one of `nupkg` / `folder`.
