@@ -147,11 +147,17 @@ runs:
           exit 1
         fi
 
+        # Windows runners: schannel curl sporadically fails with CRYPT_E_REVOCATION_OFFLINE when
+        # the CA's revocation endpoint is unreachable; --ssl-no-revoke skips only that check
+        # (certificate chain validation stays on). Linux curl has no such flag.
+        extra_curl=()
+        case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) extra_curl+=(--ssl-no-revoke);; esac
+
         call() { # method url curl-args... -> body on stdout; fails on non-2xx with body shown
           local method="$1" url="$2"; shift 2
           local body code
           body="$(mktemp)"
-          code="$(curl -sS -X "$method" "$url" -H "Authorization: Bearer $TOKEN" "$@" -o "$body" -w '%{http_code}')"
+          code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" -H "Authorization: Bearer $TOKEN" "$@" -o "$body" -w '%{http_code}')"
           if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::HTTP $code from $url" >&2
             cat "$body" >&2
