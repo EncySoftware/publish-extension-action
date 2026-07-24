@@ -80,6 +80,8 @@ from the store site work for manual tries but expire within hours.
 
 ## Moderation
 
-Extensions with the `unlisted` flag stay out of the public catalog but remain reachable by
-direct link — publishing a new version does not reset the flag. The planned CI-publish gate
-(new extensions land unlisted until approved) builds on this.
+A **new** extension (first publish of its packageId) lands hidden from the catalog until a
+store moderator approves it; the card link from the action output already works, so you can
+review and share it right away. New versions of an approved extension go live immediately.
+The action reports the GitHub repo + commit sha with each publish (provenance), and the
+backend records them on the version for the audit trail.

@@ -196,8 +196,13 @@ runs:
         case "$(echo "$LICENSED" | tr '[:upper:]' '[:lower:]')" in
           true|1|yes) licensed_json=true ;;
         esac
+        # CI provenance: which repo/commit produced the package (backend records it on the
+        # version row for the moderation/audit trail; older backends just ignore the fields).
         payload="$(jq -cn --arg p "$pkgId" --arg v "$ver" --arg u "$upl" --argjson l "$licensed_json" \
-                   '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}')"
+                   --arg r "${GITHUB_REPOSITORY:-}" --arg s "${GITHUB_SHA:-}" \
+                   '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}
+                    + (if $r != "" then {sourceRepo:$r} else {} end)
+                    + (if $s != "" then {sourceSha:$s} else {} end)')"
         pub="$(call POST "$API/extensions" -H 'Content-Type: application/json' --data-binary "$payload")"
         slug="$(jq -r '.slug // empty' <<< "$pub")"
         if [ -z "$slug" ]; then
