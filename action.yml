@@ -10,9 +10,13 @@ branding:
 inputs:
   token:
     description: >
-      Bearer token for the store API (any valid Keycloak token, realm licsys). Pass it from a
-      repo secret. A leading "Bearer " prefix is tolerated.
-    required: true
+      Bearer token for the store API (Keycloak realm licsys), from a repo secret. OPTIONAL once
+      the repository is registered as the package's trusted publisher: leave it empty and the
+      action authenticates with the workflow's own GitHub OIDC token instead (requires
+      `permissions: id-token: write` in the workflow). The first publish of a NEW package still
+      needs a token — it also auto-registers this repository as the trusted publisher.
+    required: false
+    default: ''
   nupkg:
     description: Path or glob of a ready .nupkg to publish. Mutually exclusive with `folder`.
     required: false
@@ -124,8 +128,23 @@ runs:
       run: |
         set -euo pipefail
         TOKEN="$(printf '%s' "$TOKEN" | sed 's/^[[:space:]]*Bearer[[:space:]]*//')"
-        if [ -z "$TOKEN" ]; then
-          echo "::error::'token' input is empty. Put the store token into a repo secret and pass it in."
+
+        # Auth: a store token when given; otherwise the workflow's own GitHub OIDC token
+        # (trusted publishing — works once this repository is bound to the package).
+        AUTH_ARGS=()
+        if [ -n "$TOKEN" ]; then
+          AUTH_ARGS=(-H "Authorization: Bearer $TOKEN")
+        elif [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "no store token given - authenticating with the GitHub OIDC token (trusted publishing)"
+          ghjwt="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                   "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=ency-extension-store" | jq -r '.value // empty')"
+          if [ -z "$ghjwt" ]; then
+            echo "::error::could not obtain a GitHub OIDC token."
+            exit 1
+          fi
+          AUTH_ARGS=(-H "X-GitHub-OIDC-Token: $ghjwt")
+        else
+          echo "::error::no 'token' input and no GitHub OIDC available - add \"permissions: id-token: write\" to the workflow, or set the ENCY_STORE_TOKEN secret."
           exit 1
         fi
 
@@ -157,7 +176,7 @@ runs:
           local method="$1" url="$2"; shift 2
           local body code
           body="$(mktemp)"
-          code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" -H "Authorization: Bearer $TOKEN" "$@" -o "$body" -w '%{http_code}')"
+          code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" "${AUTH_ARGS[@]}" "$@" -o "$body" -w '%{http_code}')"
           if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::HTTP $code from $url" >&2
             cat "$body" >&2

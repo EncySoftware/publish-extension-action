@@ -72,11 +72,15 @@ The store validates on the server (`parse-nupkg` → 400 otherwise):
   catalog will not index the package;
 - `sdkVersion` in `package.info.json` drives the "minimal ENCY version" shown on the card.
 
-## Getting a token
+## Auth: token vs OIDC trusted publishing
 
-Any valid Keycloak `licsys` access token works today (no role check yet). For CI use a
-long-lived offline/service token stored as a repo secret — ask the store team. Browser tokens
-from the store site work for manual tries but expire within hours.
+- **First publish of a new extension** — a store token (any valid Keycloak `licsys` access
+  token) in the `token` input. This publish also auto-registers the repository as the
+  package's **trusted publisher**.
+- **Every publish after that** — leave `token` empty and add `permissions: id-token: write`
+  to the workflow: the action authenticates with the run's own GitHub OIDC token. No secrets,
+  nothing expires, and the repository can publish only its own package. Owners manage the
+  binding via `GET/PUT/DELETE /api/extensions/{slug}/trusted-publisher`.
 
 ## Moderation
 
