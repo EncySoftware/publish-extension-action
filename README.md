@@ -9,11 +9,12 @@ ready-to-fork repo wired to this action.
 
 ## What it does
 
-1. **Pack** (optional): stamps `version` into `package.info.json` and packs a flat build-output
-   folder into an ENCY `.nupkg` with the ENCY pack CLI. Skip this by passing a ready `nupkg`.
-2. **Publish**: `POST /extensions/parse-nupkg` (stages the original bytes — the backend never
-   repacks free packages) → `POST /extensions` (backend pushes to the feed). The token's subject
-   becomes the extension **owner**.
+1. **Pack**: by default the flat build-output folder is uploaded to the store backend, which
+   builds the `.nupkg` itself (server-side packing — no tooling on the runner; the `version`
+   from the git tag is stamped into the nuspec and the packed `package.info.json`).
+   Alternatives: pass a ready `nupkg`, or pass `pack-cli` to pack on the runner with the ENCY CLI.
+2. **Publish**: the staged package goes through `POST /extensions` (backend pushes to the feed).
+   The token's subject becomes the extension **owner**; new extensions wait for moderation.
 
 ## Usage
 
@@ -23,8 +24,7 @@ ready-to-fork repo wired to this action.
   uses: ENCY-SOFTWARE-LTD/publish-extension-action@v1
   with:
     token: ${{ secrets.ENCY_STORE_TOKEN }}
-    folder: src/bin/Release          # flat build output (dotnet build, NOT publish)
-    pack-cli: ${{ env.PACK_CLI }}    # path to the ENCY pack CLI
+    folder: src/bin/Release          # flat build output (dotnet build, NOT publish); the backend packs it
     version: ${{ env.PKG_VERSION }}  # e.g. 1.2.3 from tag v1.2.3
 
 - run: echo "Published ${{ steps.publish.outputs.card-url }}"
@@ -45,9 +45,9 @@ Or with a package you packed yourself:
 |---|---|---|---|
 | `token` | yes | — | Store bearer token (Keycloak realm `licsys`). Keep it in a repo secret. |
 | `nupkg` | no* | — | Path/glob of a ready `.nupkg` (newest match wins). |
-| `folder` | no* | — | Flat build-output folder to pack: `<Name>.dll` + `<Name>.settings.json` + `package.info.json`. Use `dotnet build` — `dotnet publish` drags SDK dlls into the output. |
-| `pack-cli` | with `folder` | — | Path to the ENCY pack CLI executable. |
-| `version` | no | keep file value | Stamped into `package.info.json` before packing (folder mode only). |
+| `folder` | no* | — | Flat build-output folder: `<Name>.dll` + `<Name>.settings.json` + `package.info.json`. The backend packs it (server-side). Use `dotnet build` — `dotnet publish` drags SDK dlls into the output. |
+| `pack-cli` | no | — | Optional: pack on the runner with the ENCY CLI instead of server-side packing. |
+| `version` | no | keep file value | Version stamped into the package (folder mode; typically from the git tag). |
 | `licensed` | no | `false` | Publish as a paid extension. |
 | `dry-run` | no | `false` | Pack + server-side validation (parse-nupkg), skip the publish step. |
 | `api-base` | no | `https://dmc.encycam.com/store/api` | Override for test environments. |

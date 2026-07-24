@@ -19,14 +19,17 @@ inputs:
     default: ''
   folder:
     description: >
-      Build-output folder to pack first. Must be a FLAT build output: <Name>.dll +
+      Build-output folder to publish. Must be a FLAT build output: <Name>.dll +
       <Name>.settings.json + package.info.json (+ readme.md for the store card). Use
       `dotnet build`, not `dotnet publish` - publish drags all SDK dlls into the folder.
-      Requires `pack-cli`.
+      By default the files are uploaded and the STORE BACKEND packs them (no tooling
+      needed on the runner); pass `pack-cli` to pack locally with the ENCY CLI instead.
     required: false
     default: ''
   pack-cli:
-    description: Path to the ENCY pack CLI executable. Required when `folder` is used.
+    description: >
+      Optional path to the ENCY pack CLI executable — packs on the runner instead of
+      server-side packing.
     required: false
     default: ''
   version:
@@ -65,9 +68,9 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Pack build output
+    - name: Pack build output (local CLI mode)
       id: pack
-      if: ${{ inputs.folder != '' }}
+      if: ${{ inputs.folder != '' && inputs.pack-cli != '' }}
       shell: bash
       env:
         FOLDER: ${{ inputs.folder }}
@@ -75,10 +78,6 @@ runs:
         STAMP_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        if [ -z "$PACK_CLI" ]; then
-          echo "::error::'folder' input requires 'pack-cli' (path to the ENCY pack CLI executable)."
-          exit 1
-        fi
         if [ ! -e "$PACK_CLI" ]; then
           echo "::error::pack CLI not found at: $PACK_CLI"
           exit 1
@@ -117,6 +116,8 @@ runs:
         TOKEN: ${{ inputs.token }}
         NUPKG_INPUT: ${{ inputs.nupkg }}
         NUPKG_PACKED: ${{ steps.pack.outputs.nupkg }}
+        FOLDER: ${{ inputs.folder }}
+        STAMP_VERSION: ${{ inputs.version }}
         LICENSED: ${{ inputs.licensed }}
         DRY_RUN: ${{ inputs.dry-run }}
         API: ${{ inputs.api-base }}
@@ -128,13 +129,10 @@ runs:
           exit 1
         fi
 
-        # resolve the .nupkg: packed one wins, otherwise the 'nupkg' input (glob allowed, newest match)
+        # package source: a CLI-packed nupkg wins, then the 'nupkg' input (glob, newest match),
+        # otherwise the 'folder' files go to the backend which packs them itself
         nupkg="$NUPKG_PACKED"
-        if [ -z "$nupkg" ]; then
-          if [ -z "$NUPKG_INPUT" ]; then
-            echo "::error::provide either 'nupkg' (ready package) or 'folder' (+ 'pack-cli')."
-            exit 1
-          fi
+        if [ -z "$nupkg" ] && [ -n "$NUPKG_INPUT" ]; then
           shopt -s nullglob
           matches=( $NUPKG_INPUT )
           shopt -u nullglob
@@ -144,7 +142,10 @@ runs:
           fi
           nupkg="$(ls -t "${matches[@]}" | head -n 1)"
         fi
-        echo "publishing: $nupkg"
+        if [ -z "$nupkg" ] && [ -z "$FOLDER" ]; then
+          echo "::error::provide 'folder' (the backend packs it), 'nupkg' (ready package), or 'folder'+'pack-cli'."
+          exit 1
+        fi
 
         call() { # method url curl-args... -> body on stdout; fails on non-2xx with body shown
           local method="$1" url="$2"; shift 2
@@ -161,8 +162,32 @@ runs:
           rm -f "$body"
         }
 
-        echo "== parse-nupkg (stages the original bytes) =="
-        parsed="$(call POST "$API/extensions/parse-nupkg" -F "file=@$nupkg")"
+        if [ -n "$nupkg" ]; then
+          echo "== parse-nupkg (stages the original bytes): $nupkg =="
+          parsed="$(call POST "$API/extensions/parse-nupkg" -F "file=@$nupkg")"
+        else
+          if [ ! -d "$FOLDER" ]; then
+            echo "::error::build-output folder not found: $FOLDER"
+            exit 1
+          fi
+          echo "== uploading build output for server-side packing: $FOLDER =="
+          ids=()
+          for f in "$FOLDER"/*; do
+            [ -f "$f" ] || continue
+            up="$(call POST "$API/storage/upload" -F "file=@$f")"
+            ids+=( "$(jq -r '.uploadId' <<< "$up")" )
+            echo "  uploaded $(basename "$f")"
+          done
+          if [ ${#ids[@]} -eq 0 ]; then
+            echo "::error::no files in $FOLDER"
+            exit 1
+          fi
+          payload="$(jq -cn --arg v "$STAMP_VERSION" \
+                     '$ARGS.positional as $ids | {fileUploadIds:$ids} + (if $v != "" then {version:$v} else {} end)' \
+                     --args "${ids[@]}")"
+          echo "== pack-folder (the backend builds the package) =="
+          parsed="$(call POST "$API/extensions/pack-folder" -H 'Content-Type: application/json' --data-binary "$payload")"
+        fi
         pkgId="$(jq -r '.packageId // empty' <<< "$parsed")"
         ver="$(jq -r '.version // empty' <<< "$parsed")"
         upl="$(jq -r '.nupkgUploadId // empty' <<< "$parsed")"
