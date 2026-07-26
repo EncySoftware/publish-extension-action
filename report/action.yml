@@ -20,6 +20,13 @@ inputs:
     description: Version being published, when known.
     required: false
     default: ''
+  log-file:
+    description: >
+      A file whose tail becomes the reason shown on the extension's card — point it at the build log.
+      Without it the card can only say WHICH step failed, which still sends the author to GitHub to
+      find out why. Missing or unreadable is fine: the report just carries no reason.
+    required: false
+    default: ''
   api-base:
     description: Store API base URL.
     required: false
@@ -35,7 +42,13 @@ runs:
         FAILED_STEP: ${{ inputs.failed-step }}
         STATUS: ${{ inputs.status }}
         VERSION: ${{ inputs.version }}
+        LOG_FILE: ${{ inputs.log-file }}
       run: |
+        # The tail, not the head: a build log opens with a banner and ends with the error.
+        if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+          FAILURE_LOG="$(tail -c 3000 "$LOG_FILE" 2>/dev/null || true)"
+          export FAILURE_LOG
+        fi
         # One implementation of the report, shared with the publish action. For an action in a
         # subdirectory GITHUB_ACTION_PATH is that subdirectory, so the script sits one level up.
         "$GITHUB_ACTION_PATH/../report.sh" "$STATUS" "$VERSION" || true
