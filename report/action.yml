@@ -1,0 +1,42 @@
+name: Report to the ENCY store
+description: >
+  Tell the ENCY Extension Store how this run is getting on, so the author reads it on the extension's
+  page instead of hunting through GitHub. Best-effort and credential-free: it signs with the
+  workflow's own GitHub OIDC token (needs `permissions: id-token: write`) and never fails the job.
+
+  The publish action reports its own steps already. This one exists for the steps BEFORE it — a
+  compile error happens in the caller's workflow, where the publish action has not run yet and so
+  cannot say anything.
+
+inputs:
+  status:
+    description: RUNNING, FAILED or PUBLISHED.
+    required: true
+  failed-step:
+    description: Which step gave up, for the message shown on the card.
+    required: false
+    default: ''
+  version:
+    description: Version being published, when known.
+    required: false
+    default: ''
+  api-base:
+    description: Store API base URL.
+    required: false
+    default: 'https://dmc.encycam.com/store/api'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        API: ${{ inputs.api-base }}
+        ACTION_REF: ${{ github.action_ref }}
+        FAILED_STEP: ${{ inputs.failed-step }}
+        STATUS: ${{ inputs.status }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        # One implementation of the report, shared with the publish action. For an action in a
+        # subdirectory GITHUB_ACTION_PATH is that subdirectory, so the script sits one level up.
+        "$GITHUB_ACTION_PATH/../report.sh" "$STATUS" "$VERSION" || true
+        exit 0
