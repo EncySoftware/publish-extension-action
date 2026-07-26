@@ -72,6 +72,22 @@ outputs:
 runs:
   using: composite
   steps:
+    # Tell the store what this run is doing, so "what happened to my build" is answered on the
+    # extension's own page instead of on GitHub. Carries no new credential: the same OIDC token that
+    # publishes signs the report, and the store takes the repository from it, never from us.
+    #
+    # Every report step is best-effort. A status line has no business failing a publish, so they
+    # swallow their own errors and always exit 0.
+    - name: Tell the store the build started
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        API: ${{ inputs.api-base }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        "$GITHUB_ACTION_PATH/report.sh" RUNNING || true
+        exit 0
+
     - name: Pack build output (local CLI mode)
       id: pack
       if: ${{ inputs.folder != '' && inputs.pack-cli != '' }}
@@ -281,3 +297,30 @@ runs:
           echo ""
           echo "_The catalog indexes within a few minutes (reindexer runs every 15 min)._"
         } >> "$GITHUB_STEP_SUMMARY"
+
+    # The two ends of the story. The store keeps only the latest state per repository, so a fresh
+    # RUNNING wipes the previous failure and these two never pile up.
+    - name: Tell the store it published
+      if: success()
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        API: ${{ inputs.api-base }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        "$GITHUB_ACTION_PATH/report.sh" PUBLISHED "${{ steps.publish.outputs.version }}" || true
+        exit 0
+
+    - name: Tell the store it failed
+      if: failure()
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        API: ${{ inputs.api-base }}
+        ACTION_REF: ${{ github.action_ref }}
+        # Which of OUR steps gave up. A compile error happens in the caller's workflow, before this
+        # action runs at all — that one is reported by the workflow's own failure step.
+        FAILED_STEP: ${{ steps.pack.outcome == 'failure' && 'Pack' || 'Publish' }}
+      run: |
+        "$GITHUB_ACTION_PATH/report.sh" FAILED || true
+        exit 0
