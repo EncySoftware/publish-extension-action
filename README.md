@@ -4,7 +4,7 @@ GitHub Action: publish an ENCY extension to the [ENCY Extension Store](https://d
 
 Push a version tag in your extension repo — the workflow builds, packs and publishes. No files
 are copied or uploaded by hand. See
-[ency-extension-template](https://github.com/ENCY-SOFTWARE-LTD/ency-extension-template) for a
+[ency-extension-template](https://github.com/EncySoftware/ency-extension-template) for a
 ready-to-fork repo wired to this action.
 
 ## What it does
@@ -21,7 +21,7 @@ ready-to-fork repo wired to this action.
 ```yaml
 - name: Publish to the ENCY store
   id: publish
-  uses: ENCY-SOFTWARE-LTD/publish-extension-action@v1
+  uses: EncySoftware/publish-extension-action@v1
   with:
     token: ${{ secrets.ENCY_STORE_TOKEN }}
     folder: src/bin/Release          # flat build output (dotnet build, NOT publish); the backend packs it
@@ -33,7 +33,7 @@ ready-to-fork repo wired to this action.
 Or with a package you packed yourself:
 
 ```yaml
-- uses: ENCY-SOFTWARE-LTD/publish-extension-action@v1
+- uses: EncySoftware/publish-extension-action@v1
   with:
     token: ${{ secrets.ENCY_STORE_TOKEN }}
     nupkg: out/*.nupkg
