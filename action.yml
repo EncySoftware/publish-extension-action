@@ -198,8 +198,24 @@ runs:
             # carries a ready-made link that fixes the run. Put that sentence in the annotation:
             # a red run shows annotations first, and "HTTP 403 from /storage/upload" on its own sends
             # the author digging through the step log for the one line that would have helped.
-            local msg
-            msg="$(jq -r '.message // empty' "$body" 2>/dev/null || true)"
+            local msg raw link
+            raw="$(jq -r '.message // empty' "$body" 2>/dev/null || true)"
+            # The job summary is the only place GitHub renders markdown, so it is the only place the
+            # store's link can be clicked. An annotation shows the text but leaves a URL in the middle
+            # of a sentence as plain characters — which is a link the author has to retype.
+            if [ -n "$raw" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                echo "### The store refused this run (HTTP $code)"
+                echo
+                echo "$raw"
+                link="$(grep -oE 'https?://[^ )]+' <<<"$raw" | head -1)"
+                if [ -n "$link" ]; then
+                  echo
+                  echo "**[Open the store and press Connect]($link)**"
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            msg="$raw"
             if [ -n "$msg" ]; then
               # Workflow commands are one line and decode %25/%0D/%0A — escape the percent first, or
               # the %2F inside the store's own link eats the rest of the message.
