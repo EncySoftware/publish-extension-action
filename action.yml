@@ -194,7 +194,20 @@ runs:
           body="$(mktemp)"
           code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" "${AUTH_ARGS[@]}" "$@" -o "$body" -w '%{http_code}')"
           if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::HTTP $code from $url" >&2
+            # The store explains refusals in the body, and its 403 for an unconnected repository
+            # carries a ready-made link that fixes the run. Put that sentence in the annotation:
+            # a red run shows annotations first, and "HTTP 403 from /storage/upload" on its own sends
+            # the author digging through the step log for the one line that would have helped.
+            local msg
+            msg="$(jq -r '.message // empty' "$body" 2>/dev/null || true)"
+            if [ -n "$msg" ]; then
+              # Workflow commands are one line and decode %25/%0D/%0A — escape the percent first, or
+              # the %2F inside the store's own link eats the rest of the message.
+              msg="${msg//'%'/%25}"; msg="${msg//$'\r'/%0D}"; msg="${msg//$'\n'/%0A}"
+              echo "::error::HTTP $code — $msg" >&2
+            else
+              echo "::error::HTTP $code from $url" >&2
+            fi
             cat "$body" >&2
             rm -f "$body"
             return 1
