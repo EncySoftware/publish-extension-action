@@ -85,6 +85,9 @@ runs:
         API: ${{ inputs.api-base }}
         ACTION_REF: ${{ github.action_ref }}
       run: |
+        # A refusal left behind by an earlier job on the same runner would be reported as this run's
+        # reason. Self-hosted runners are the ones that keep a temp directory around.
+        rm -f "${RUNNER_TEMP:-/tmp}/ency-store-refusal.txt"
         "$GITHUB_ACTION_PATH/report.sh" RUNNING || true
         exit 0
 
@@ -198,16 +201,38 @@ runs:
             # carries a ready-made link that fixes the run. Put that sentence in the annotation:
             # a red run shows annotations first, and "HTTP 403 from /storage/upload" on its own sends
             # the author digging through the step log for the one line that would have helped.
-            local msg raw link
+            local msg raw link detail
             raw="$(jq -r '.message // empty' "$body" 2>/dev/null || true)"
+            detail="$raw"
+            if [ -z "$detail" ]; then
+              # No JSON: this came from the proxy in front of the store rather than from the store,
+              # and a 413 there means the upload was cut off for its size before anybody could word
+              # it properly. Anything else gets the head of whatever was said.
+              if [ "$code" = "413" ]; then
+                detail="The package is larger than this store accepts — the upload was cut off before it reached the store."
+              else
+                detail="$(head -c 500 "$body")"
+              fi
+            fi
+            # Keep the reason for the failure report at the end of this action. The store is the only
+            # party that knows why it said no — a virus verdict, a package over the size limit — and
+            # without this the author's card ends up saying "failed at Publish" above a build log
+            # that reads "Build succeeded".
+            #
+            # One line on purpose: that is what lets the store print it on the card itself instead of
+            # behind a "why" link, which is the difference between being told and going to look.
+            printf 'HTTP %s — %s\n' "$code" "$(tr '\n\r' '  ' <<<"$detail" | sed 's/  */ /g')" \
+              > "${RUNNER_TEMP:-/tmp}/ency-store-refusal.txt"
             # The job summary is the only place GitHub renders markdown, so it is the only place the
             # store's link can be clicked. An annotation shows the text but leaves a URL in the middle
             # of a sentence as plain characters — which is a link the author has to retype.
-            if [ -n "$raw" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            if [ -n "$detail" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               {
                 echo "### The store refused this run (HTTP $code)"
                 echo
-                echo "$raw"
+                echo "$detail"
+                # Only ever from the store's own sentence: a URL fished out of a proxy error page
+                # would offer the author a button to nowhere.
                 link="$(grep -oE 'https?://[^ )]+' <<<"$raw" | head -1)"
                 if [ -n "$link" ]; then
                   echo
@@ -215,6 +240,7 @@ runs:
                 fi
               } >> "$GITHUB_STEP_SUMMARY"
             fi
+
             msg="$raw"
             if [ -n "$msg" ]; then
               # Workflow commands are one line and decode %25/%0D/%0A — escape the percent first, or
@@ -351,5 +377,13 @@ runs:
         # action runs at all — that one is reported by the workflow's own failure step.
         FAILED_STEP: ${{ steps.pack.outcome == 'failure' && 'Pack' || 'Publish' }}
       run: |
+        # …and WHY, when the store said so. This report goes out before the caller's own catch-all
+        # step, and the store keeps the first explanation of a run, so the reason survives the build
+        # log that follows it.
+        refusal="${RUNNER_TEMP:-/tmp}/ency-store-refusal.txt"
+        if [ -s "$refusal" ]; then
+          FAILURE_LOG="$(cat "$refusal")"
+          export FAILURE_LOG
+        fi
         "$GITHUB_ACTION_PATH/report.sh" FAILED || true
         exit 0
