@@ -46,6 +46,13 @@ inputs:
     description: Publish as a licensed (paid) extension.
     required: false
     default: 'false'
+  category:
+    description: >
+      Storefront category id, e.g. operation, ai, geometry-io. Optional: left empty, the store keeps
+      whatever category the extension already has, and a brand-new one waits for a moderator to sort
+      it. The ids are at <api-base>/categories, and in prose at <api-base>/categories/guide.md.
+    required: false
+    default: ''
   dry-run:
     description: Pack and validate on the server (parse-nupkg), but skip the publish step.
     required: false
@@ -142,6 +149,7 @@ runs:
         FOLDER: ${{ inputs.folder }}
         STAMP_VERSION: ${{ inputs.version }}
         LICENSED: ${{ inputs.licensed }}
+        CATEGORY: ${{ inputs.category }}
         DRY_RUN: ${{ inputs.dry-run }}
         API: ${{ inputs.api-base }}
       run: |
@@ -319,11 +327,16 @@ runs:
         esac
         # CI provenance: which repo/commit produced the package (backend records it on the
         # version row for the moderation/audit trail; older backends just ignore the fields).
+        # Category: sent only when the workflow names one. An empty input is silence, not "clear it" —
+        # the store keeps whatever the extension already had, so an extension sorted by hand does not
+        # fall back to the default on the next tag push. The list of ids is at
+        # <api-base>/categories (JSON) or /categories/guide.md (prose).
         payload="$(jq -cn --arg p "$pkgId" --arg v "$ver" --arg u "$upl" --argjson l "$licensed_json" \
-                   --arg r "${GITHUB_REPOSITORY:-}" --arg s "${GITHUB_SHA:-}" \
+                   --arg r "${GITHUB_REPOSITORY:-}" --arg s "${GITHUB_SHA:-}" --arg c "${CATEGORY:-}" \
                    '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}
                     + (if $r != "" then {sourceRepo:$r} else {} end)
-                    + (if $s != "" then {sourceSha:$s} else {} end)')"
+                    + (if $s != "" then {sourceSha:$s} else {} end)
+                    + (if $c != "" then {category:$c} else {} end)')"
         pub="$(call POST "$API/extensions" -H 'Content-Type: application/json' --data-binary "$payload")"
         slug="$(jq -r '.slug // empty' <<< "$pub")"
         if [ -z "$slug" ]; then
