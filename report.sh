@@ -13,7 +13,7 @@ set -uo pipefail
 
 status="${1:-}"
 version="${2:-}"
-api="${API:-https://dmc.encycam.com/store/api}"
+api="${API:-https://apps.encycam.com/api}"
 
 [ -n "$status" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0     # jq builds the JSON; without it, stay silent

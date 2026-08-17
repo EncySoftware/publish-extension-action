@@ -1,6 +1,6 @@
 # publish-extension-action
 
-GitHub Action: publish an ENCY extension to the [ENCY Extension Store](https://dmc.encycam.com/store).
+GitHub Action: publish an ENCY extension to the [ENCY Extension Store](https://apps.encycam.com).
 
 Push a version tag in your extension repo — the workflow builds, packs and publishes. No files
 are copied or uploaded by hand. See
@@ -50,7 +50,7 @@ Or with a package you packed yourself:
 | `version` | no | keep file value | Version stamped into the package (folder mode; typically from the git tag). |
 | `licensed` | no | `false` | Publish as a paid extension. |
 | `dry-run` | no | `false` | Pack + server-side validation (parse-nupkg), skip the publish step. |
-| `api-base` | no | `https://dmc.encycam.com/store/api` | Override for test environments. |
+| `api-base` | no | `https://apps.encycam.com/api` | Override for test environments. |
 
 \* exactly one of `nupkg` / `folder`.
 
@@ -61,7 +61,7 @@ Or with a package you packed yourself:
 | `package-id` | `MyExtension` |
 | `version` | `1.2.3` |
 | `slug` | `myextension` |
-| `card-url` | `https://dmc.encycam.com/store/extension/myextension` |
+| `card-url` | `https://apps.encycam.com/extension/myextension` |
 
 ## Package requirements
 

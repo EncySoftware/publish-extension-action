@@ -30,7 +30,7 @@ inputs:
   api-base:
     description: Store API base URL.
     required: false
-    default: 'https://dmc.encycam.com/store/api'
+    default: 'https://apps.encycam.com/api'
 
 runs:
   using: composite
