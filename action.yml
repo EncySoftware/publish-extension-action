@@ -199,11 +199,15 @@ runs:
         extra_curl=()
         case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) extra_curl+=(--ssl-no-revoke);; esac
 
+        # Response headers of the LAST call, for the remarks the store attaches to a publish it
+        # accepted. Every call truncates the file, so after the publish it holds the publish's own.
+        hdrs="${RUNNER_TEMP:-/tmp}/ency-store-headers.txt"
+
         call() { # method url curl-args... -> body on stdout; fails on non-2xx with body shown
           local method="$1" url="$2"; shift 2
           local body code
           body="$(mktemp)"
-          code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" "${AUTH_ARGS[@]}" "$@" -o "$body" -w '%{http_code}')"
+          code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" "${AUTH_ARGS[@]}" "$@" -D "$hdrs" -o "$body" -w '%{http_code}')"
           if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
             # The store explains refusals in the body, and its 403 for an unconnected repository
             # carries a ready-made link that fixes the run. Put that sentence in the annotation:
@@ -342,6 +346,28 @@ runs:
         if [ -z "$slug" ]; then
           echo "::error::publish returned no slug:"; echo "$pub"
           exit 1
+        fi
+
+        # What the store accepted but wants said out loud — today, a Schedule A declaration nobody
+        # has answered yet. It arrives as X-Store-Warning, and a header nobody reads is silence:
+        # ::warning:: puts it among the run's annotations, which a GREEN run shows too, and the job
+        # summary keeps its link clickable. Refusals travel the other road (the error above); this
+        # one exists so an author hears about the 1 November deadline before it starts refusing.
+        notes="$(sed -n 's/^[Xx]-[Ss]tore-[Ww]arning:[[:space:]]*//p' "$hdrs" 2>/dev/null | sed 's/[[:cntrl:]]*$//')"
+        if [ -n "$notes" ]; then
+          {
+            echo "### Published, with a note from the store"
+            echo ""
+            while IFS= read -r note; do if [ -n "$note" ]; then echo "- $note"; fi; done <<< "$notes"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # `if`, not `[ … ] && echo`: under `set -e` a false test as the last command of a loop
+          # body ends the step — and ending a step that has already published is the one outcome a
+          # remark must never cause.
+          while IFS= read -r note; do
+            # Workflow commands are one line and decode %25 — escape the percent, or a %2F in the
+            # store's own link would eat the rest of the sentence.
+            if [ -n "$note" ]; then echo "::warning::${note//'%'/%25}"; fi
+          done <<< "$notes"
         fi
 
         store_base="${API%/api}"

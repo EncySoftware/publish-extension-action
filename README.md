@@ -72,6 +72,21 @@ The store validates on the server (`parse-nupkg` → 400 otherwise):
   catalog will not index the package;
 - `sdkVersion` in `package.info.json` drives the "minimal ENCY version" shown on the card.
 
+## Consents the store checks
+
+Two, and neither is an input of this action — they belong to the publisher and to the package:
+
+- **The Developer Agreement**, once per publisher, accepted in a browser at
+  `<store>/publish`. Until it is, a run is refused with 403 and that link; the store's sentence
+  is printed as the run's error, and the summary turns it into a button.
+- **The Schedule A declaration**, with every submission, read from the `reservedFunctionality`
+  block of `package.info.json` — `{"none": true, "confirmations": ["4.2","4.9","4.6"]}`, or a
+  `"domain"` code with the `"entitlement"` it verifies. Missing or left unanswered, the store
+  publishes anyway **until 1 November 2026** and says so in an `X-Store-Warning` header, which
+  this action prints as a run annotation and a line in the job summary. From that date it is a
+  refusal instead. Codes and entitlements:
+  <https://encycam.com/legal/extension-store/reserved-functionality/>.
+
 ## Auth: token vs OIDC trusted publishing
 
 - **First publish of a new extension** — a store token (any valid Keycloak `licsys` access
