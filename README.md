@@ -76,8 +76,9 @@ The store validates on the server (`parse-nupkg` → 400 otherwise):
 
 Two, and neither is an input of this action — they belong to the publisher and to the package:
 
-- **The Developer Agreement**, once per publisher, accepted in a browser at
-  `<store>/publish`. Until it is, a run is refused with 403 and that link; the store's sentence
+- **Developer registration and the Developer Agreement**, once per publisher, done in a browser at
+  `<store>/publish`: a short registration, then I Agree. Until then, a run is refused with 403
+  and that link; the store's sentence
   is printed as the run's error, and the summary turns it into a button.
 - **The Schedule A declaration**, with every submission, read from the `reservedFunctionality`
   block of `package.info.json` — `{"none": true, "confirmations": ["4.2","4.9","4.6"]}`, or a
