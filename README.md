@@ -85,7 +85,10 @@ Two, and neither is an input of this action — they belong to the publisher and
   nothing Schedule A lists — and otherwise each area it does provide is a
   `{"domain", "entitlement", "capabilities"}` entry (`capabilities` optional), the entitlement being
   the licence Schedule A assigns to that area. The first run with an answer stops with a link to
-  confirm it in the store — once per answer; the summary turns it into a button. Without the key,
+  confirm it in the store; the summary turns it into a button. After that the store asks again only
+  when the answer changes, when a new version of Schedule A comes into force, when the words of the
+  statements change, or when a run is credited to another person — say, a colleague publishing from
+  the same repository or organisation: a confirmation counts only for whoever made it. Without the key,
   the store publishes anyway **until 1 November 2026** and says so in an `X-Store-Warning` header,
   which this action prints as a run annotation and a line in the job summary. From that date it is
   a refusal instead. Areas and their licences:
