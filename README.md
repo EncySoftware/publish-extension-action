@@ -80,12 +80,15 @@ Two, and neither is an input of this action — they belong to the publisher and
   `<store>/publish`: a short registration, then I Agree. Until then, a run is refused with 403
   and that link; the store's sentence
   is printed as the run's error, and the summary turns it into a button.
-- **The Schedule A declaration**, with every submission, read from the `reservedFunctionality`
-  block of `package.info.json` — `{"none": true, "confirmations": ["4.2","4.9","4.6"]}`, or a
-  `"domain"` code with the `"entitlement"` it verifies. Missing or left unanswered, the store
-  publishes anyway **until 1 November 2026** and says so in an `X-Store-Warning` header, which
-  this action prints as a run annotation and a line in the job summary. From that date it is a
-  refusal instead. Codes and entitlements:
+- **The Schedule A declaration**, with every submission, read from `reservedDomains` in
+  `package.info.json` (Schedule B §B.3.2): `[]` is the answer "none" — the extension provides
+  nothing Schedule A lists — and otherwise each area it does provide is a
+  `{"domain", "entitlement", "capabilities"}` entry (`capabilities` optional), the entitlement being
+  the licence Schedule A assigns to that area. The first run with an answer stops with a link to
+  confirm it in the store — once per answer; the summary turns it into a button. Without the key,
+  the store publishes anyway **until 1 November 2026** and says so in an `X-Store-Warning` header,
+  which this action prints as a run annotation and a line in the job summary. From that date it is
+  a refusal instead. Areas and their licences:
   <https://encycam.com/legal/extension-store/reserved-functionality/>.
 
 ## Auth: token vs OIDC trusted publishing

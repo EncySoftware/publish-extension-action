@@ -247,8 +247,16 @@ runs:
                 # would offer the author a button to nowhere.
                 link="$(grep -oE 'https?://[^ )]+' <<<"$raw" | head -1)"
                 if [ -n "$link" ]; then
+                  # What the link leads to decides what the button says: the store refuses a run for
+                  # three different reasons, and "press Connect" was right for one of them.
+                  case "$link" in
+                    *"declare="*) label="Confirm the declaration in the store" ;;
+                    *"/publish"*) label="Register and accept the terms" ;;
+                    *"connect="*) label="Connect the repository" ;;
+                    *) label="Open the store" ;;
+                  esac
                   echo
-                  echo "**[Open the store and press Connect]($link)**"
+                  echo "**[$label]($link)**"
                 fi
               } >> "$GITHUB_STEP_SUMMARY"
             fi
