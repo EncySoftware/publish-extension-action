@@ -213,7 +213,7 @@ runs:
             # carries a ready-made link that fixes the run. Put that sentence in the annotation:
             # a red run shows annotations first, and "HTTP 403 from /storage/upload" on its own sends
             # the author digging through the step log for the one line that would have helped.
-            local msg raw link detail
+            local msg raw link detail label
             raw="$(jq -r '.message // empty' "$body" 2>/dev/null || true)"
             detail="$raw"
             if [ -z "$detail" ]; then
@@ -251,12 +251,16 @@ runs:
                 # domains=none, reads as an area named "none".
                 link="${link%[.,;:]}"
                 if [ -n "$link" ]; then
-                  # What the link leads to decides what the button says: the store refuses a run for
-                  # three different reasons, and "press Connect" was right for one of them.
+                  # What the link leads to decides what the button says. A refusal links to the
+                  # declaration, the terms, the repository connection, or Schedule A — the only legal
+                  # document a refusal links to today (a missing or old-style declaration, from
+                  # 1 November), and not the store at all. The terms are the publish page itself only,
+                  # not /publishing-policy/ or a workflow's publish.yml.
                   case "$link" in
                     *"declare="*) label="Confirm the declaration in the store" ;;
-                    *"/publish"*) label="Register and accept the terms" ;;
+                    *"/publish"|*"/publish?"*|*"/publish#"*) label="Register and accept the terms" ;;
                     *"connect="*) label="Connect the repository" ;;
+                    *"/legal/"*) label="Read Schedule A" ;;
                     *) label="Open the store" ;;
                   esac
                   echo
