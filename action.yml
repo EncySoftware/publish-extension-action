@@ -246,6 +246,10 @@ runs:
                 # Only ever from the store's own sentence: a URL fished out of a proxy error page
                 # would offer the author a button to nowhere.
                 link="$(grep -oE 'https?://[^ )]+' <<<"$raw" | head -1)"
+                # The sentence goes on after the link ("Open <link>, sign in and press I Agree"), and
+                # its comma is not part of the address: /publish, is a page that does not exist, and
+                # domains=none, reads as an area named "none".
+                link="${link%[.,;:]}"
                 if [ -n "$link" ]; then
                   # What the link leads to decides what the button says: the store refuses a run for
                   # three different reasons, and "press Connect" was right for one of them.
