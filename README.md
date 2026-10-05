@@ -62,6 +62,7 @@ Or with a package you packed yourself:
 | `version` | `1.2.3` |
 | `slug` | `myextension` |
 | `card-url` | `https://apps.encycam.com/extension/myextension` |
+| `submitted` | `true` when the store took the package for review (HTTP 202); `slug` and `card-url` are then empty |
 
 ## Package requirements
 
@@ -110,5 +111,8 @@ Two, and neither is an input of this action — they belong to the publisher and
 A **new** extension (first publish of its packageId) lands hidden from the catalog until a
 store moderator approves it; the card link from the action output already works, so you can
 review and share it right away. New versions of an approved extension go live immediately.
+The store may also answer **Submitted for review** (HTTP 202) to a publication it reviews before
+the catalog shows it — today the first publication of a new extension: the run stays green with a
+notice, and `slug`/`card-url` stay empty (`submitted` is `true`) until a moderator approves it.
 The action reports the GitHub repo + commit sha with each publish (provenance), and the
 backend records them on the version for the audit trail.

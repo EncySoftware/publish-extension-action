@@ -70,11 +70,16 @@ outputs:
     description: Published version
     value: ${{ steps.publish.outputs.version }}
   slug:
-    description: Store card slug
+    description: Store card slug. Empty when the store took the package for review (see `submitted`)
     value: ${{ steps.publish.outputs.slug }}
   card-url:
-    description: Store card URL
+    description: Store card URL. Empty when the store took the package for review (see `submitted`)
     value: ${{ steps.publish.outputs.card-url }}
+  submitted:
+    description: >
+      'true' when the store accepted the package but did not publish it yet (HTTP 202) — it waits for
+      a moderator, or to be signed — so there is no card yet. Empty when it was published.
+    value: ${{ steps.publish.outputs.submitted }}
 
 runs:
   using: composite
@@ -202,12 +207,16 @@ runs:
         # Response headers of the LAST call, for the remarks the store attaches to a publish it
         # accepted. Every call truncates the file, so after the publish it holds the publish's own.
         hdrs="${RUNNER_TEMP:-/tmp}/ency-store-headers.txt"
+        # …and its status code: `call` runs in a subshell, so a variable would not come back. Only the
+        # publish reads it — 202 there is "accepted, not published yet", which carries no card.
+        codefile="${RUNNER_TEMP:-/tmp}/ency-store-status.txt"
 
         call() { # method url curl-args... -> body on stdout; fails on non-2xx with body shown
           local method="$1" url="$2"; shift 2
           local body code
           body="$(mktemp)"
           code="$(curl -sS "${extra_curl[@]}" -X "$method" "$url" "${AUTH_ARGS[@]}" "$@" -D "$hdrs" -o "$body" -w '%{http_code}')"
+          printf '%s' "$code" > "$codefile"
           if ! [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
             # The store explains refusals in the body, and its 403 for an unconnected repository
             # carries a ready-made link that fixes the run. Put that sentence in the annotation:
@@ -358,10 +367,18 @@ runs:
                     + (if $s != "" then {sourceSha:$s} else {} end)
                     + (if $c != "" then {category:$c} else {} end)')"
         pub="$(call POST "$API/extensions" -H 'Content-Type: application/json' --data-binary "$payload")"
-        slug="$(jq -r '.slug // empty' <<< "$pub")"
-        if [ -z "$slug" ]; then
-          echo "::error::publish returned no slug:"; echo "$pub"
-          exit 1
+        # 202: accepted, but not in the feed yet — it waits for a moderator (state SUBMITTED) or to be
+        # signed (PENDING/SIGNED). That is a success with no card, so no slug to ask for. Anything else
+        # in 2xx is the card, as before.
+        submitted=false
+        if [ "$(cat "$codefile" 2>/dev/null || true)" = "202" ]; then
+          submitted=true
+        else
+          slug="$(jq -r '.slug // empty' <<< "$pub")"
+          if [ -z "$slug" ]; then
+            echo "::error::publish returned no slug:"; echo "$pub"
+            exit 1
+          fi
         fi
 
         # What the store accepted but wants said out loud — today, a Schedule A declaration nobody
@@ -372,7 +389,8 @@ runs:
         notes="$(sed -n 's/^[Xx]-[Ss]tore-[Ww]arning:[[:space:]]*//p' "$hdrs" 2>/dev/null | sed 's/[[:cntrl:]]*$//')"
         if [ -n "$notes" ]; then
           {
-            echo "### Published, with a note from the store"
+            if [ "$submitted" = true ]; then echo "### Submitted, with a note from the store"
+            else echo "### Published, with a note from the store"; fi
             echo ""
             while IFS= read -r note; do if [ -n "$note" ]; then echo "- $note"; fi; done <<< "$notes"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -384,6 +402,40 @@ runs:
             # store's own link would eat the rest of the sentence.
             if [ -n "$note" ]; then echo "::warning::${note//'%'/%25}"; fi
           done <<< "$notes"
+        fi
+
+        if [ "$submitted" = true ]; then
+          # The store's own sentence says which wait it is; the ids come from its answer too, falling
+          # back to what parse-nupkg said (they are the same package).
+          s_pkg="$(jq -r '.packageId // empty' <<< "$pub" 2>/dev/null || true)"; s_pkg="${s_pkg:-$pkgId}"
+          s_ver="$(jq -r '.version // empty' <<< "$pub" 2>/dev/null || true)"; s_ver="${s_ver:-$ver}"
+          s_msg="$(jq -r '.message // empty' <<< "$pub" 2>/dev/null || true)"
+          s_state="$(jq -r '.state // empty' <<< "$pub" 2>/dev/null || true)"
+          s_msg="${s_msg:-a moderator approves it before it appears in the catalog}"
+          s_msg="$(tr '\n\r' '  ' <<< "$s_msg" | sed 's/  */ /g; s/ *$//')"
+          # Waiting to be signed is not waiting for a reviewer; the same line would tell the author to
+          # expect a moderator nobody has asked.
+          s_label="Submitted for review"
+          case "$s_state" in PENDING|SIGNED) s_label="Accepted, not in the catalog yet" ;; esac
+          s_line="$s_label: $s_pkg $s_ver — $s_msg"
+          # Workflow commands are one line and decode %25 — escape the percent first.
+          echo "::notice::${s_line//'%'/%25}"
+          {
+            echo "package-id=$s_pkg"
+            echo "version=$s_ver"
+            echo "submitted=true"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### $s_label :hourglass_flowing_sand:"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Package | \`$s_pkg\` |"
+            echo "| Version | \`$s_ver\` |"
+            echo ""
+            echo "$s_msg"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
         fi
 
         store_base="${API%/api}"
@@ -411,7 +463,7 @@ runs:
     # The two ends of the story. The store keeps only the latest state per repository, so a fresh
     # RUNNING wipes the previous failure and these two never pile up.
     - name: Tell the store it published
-      if: success()
+      if: success() && steps.publish.outputs.submitted != 'true'
       shell: bash
       env:
         TOKEN: ${{ inputs.token }}
@@ -419,6 +471,23 @@ runs:
         ACTION_REF: ${{ github.action_ref }}
       run: |
         "$GITHUB_ACTION_PATH/report.sh" PUBLISHED "${{ steps.publish.outputs.version }}" || true
+        exit 0
+
+    # Accepted but not published (HTTP 202): the run is green, and the card in the store should say
+    # it waits rather than "building". A store that does not know this status yet answers 400 — said
+    # as a warning, because the package itself went through.
+    - name: Tell the store it was submitted
+      if: success() && steps.publish.outputs.submitted == 'true'
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        API: ${{ inputs.api-base }}
+        ACTION_REF: ${{ github.action_ref }}
+        VERSION: ${{ steps.publish.outputs.version }}
+        REPORT_WARN: 'true'
+      run: |
+        # Through bash: report.sh carries no executable bit in git, which only a Windows runner forgives.
+        bash "$GITHUB_ACTION_PATH/report.sh" SUBMITTED "$VERSION" || true
         exit 0
 
     - name: Tell the store it failed
