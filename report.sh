@@ -11,8 +11,8 @@
 # that token rather than from anything we send, so no run can report against somebody else's.
 #
 # REPORT_WARN=true turns "the store did not take the report" into a run annotation instead of
-# silence — still exit 0. Set for SUBMITTED only: a store older than that status answers 400, and the
-# author should hear why the card still says "building" about a package that went through.
+# silence — still exit 0. Set only for the report after a 202: a store older than SUBMITTED answers
+# 400, and the author should hear why the card still says "building" about a package the store took.
 set -uo pipefail
 
 warn() { if [ -n "${REPORT_WARN:-}" ]; then echo "::warning::$*"; fi; }

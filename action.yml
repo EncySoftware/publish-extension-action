@@ -77,9 +77,14 @@ outputs:
     value: ${{ steps.publish.outputs.card-url }}
   submitted:
     description: >
-      'true' when the store accepted the package but did not publish it yet (HTTP 202) — it waits for
-      a moderator, or to be signed — so there is no card yet. Empty when it was published.
+      'true' when the store took the package but did not publish it (HTTP 202), so there is no card
+      yet. Empty when it was published. `state` says why.
     value: ${{ steps.publish.outputs.submitted }}
+  state:
+    description: >
+      The store's state of the version when it answered 202: SUBMITTED (or empty) waits for a moderator,
+      PENDING or SIGNED to be signed; FAILED, REJECTED and WITHDRAWN will not reach the catalog as they are.
+    value: ${{ steps.publish.outputs.state }}
 
 runs:
   using: composite
@@ -405,35 +410,56 @@ runs:
         fi
 
         if [ "$submitted" = true ]; then
-          # The store's own sentence says which wait it is; the ids come from its answer too, falling
-          # back to what parse-nupkg said (they are the same package).
+          # The ids come from the store's answer, falling back to what parse-nupkg said (they are the
+          # same package). A 202 may carry no body at all.
           s_pkg="$(jq -r '.packageId // empty' <<< "$pub" 2>/dev/null || true)"; s_pkg="${s_pkg:-$pkgId}"
           s_ver="$(jq -r '.version // empty' <<< "$pub" 2>/dev/null || true)"; s_ver="${s_ver:-$ver}"
           s_msg="$(jq -r '.message // empty' <<< "$pub" 2>/dev/null || true)"
           s_state="$(jq -r '.state // empty' <<< "$pub" 2>/dev/null || true)"
-          s_msg="${s_msg:-a moderator approves it before it appears in the catalog}"
           s_msg="$(tr '\n\r' '  ' <<< "$s_msg" | sed 's/  */ /g; s/ *$//')"
-          # Waiting to be signed is not waiting for a reviewer; the same line would tell the author to
-          # expect a moderator nobody has asked.
-          s_label="Submitted for review"
-          case "$s_state" in PENDING|SIGNED) s_label="Accepted, not in the catalog yet" ;; esac
-          s_line="$s_label: $s_pkg $s_ver — $s_msg"
+          s_state="$(tr -cd 'A-Za-z_' <<< "$s_state")"
+          # Classified the way the server does. SUBMITTED, or no state at all, waits for a moderator;
+          # PENDING/SIGNED wait to be signed, and nobody has asked a moderator. FAILED, REJECTED and
+          # WITHDRAWN will not reach the catalog as they are. The 202's sentence says "waiting to be
+          # signed" for every state but SUBMITTED, so for the rest the state is named beside it and
+          # nothing is promised. What the store's card says follows the same split: the version on its
+          # way is SUBMITTED, one that stopped is FAILED with the reason, as a refusal would be.
+          s_level=notice; s_icon=":hourglass_flowing_sand:"; report=SUBMITTED; reason=""
+          case "$s_state" in
+            ""|SUBMITTED)
+              s_label="Submitted for review"
+              s_body="${s_msg:-a moderator approves it before it appears in the catalog}" ;;
+            PENDING|SIGNED)
+              s_label="Accepted, not in the catalog yet"
+              s_body="${s_msg:-it appears in the catalog once it reaches the feed}" ;;
+            FAILED|REJECTED|WITHDRAWN)
+              s_label="Not published"; s_level=warning; s_icon=":warning:"; report=FAILED
+              s_body="the store took the upload but reports the version as $s_state, so it will not reach the catalog as it is${s_msg:+ (the store said: $s_msg)}"
+              reason="HTTP 202 — the store took $s_pkg $s_ver but reports it as $s_state${s_msg:+: $s_msg}" ;;
+            *)
+              s_label="Accepted, not in the catalog yet"; s_level=warning; s_icon=":warning:"
+              s_body="the store reports the version as $s_state${s_msg:+: $s_msg}" ;;
+          esac
+          s_line="$s_label: $s_pkg $s_ver — $s_body"
           # Workflow commands are one line and decode %25 — escape the percent first.
-          echo "::notice::${s_line//'%'/%25}"
+          echo "::$s_level::${s_line//'%'/%25}"
           {
             echo "package-id=$s_pkg"
             echo "version=$s_ver"
             echo "submitted=true"
+            echo "state=$s_state"
+            echo "report-status=$report"
+            echo "report-reason=$reason"
           } >> "$GITHUB_OUTPUT"
           {
-            echo "### $s_label :hourglass_flowing_sand:"
+            echo "### $s_label $s_icon"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| Package | \`$s_pkg\` |"
             echo "| Version | \`$s_ver\` |"
             echo ""
-            echo "$s_msg"
+            echo "$s_body"
           } >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
@@ -473,10 +499,10 @@ runs:
         "$GITHUB_ACTION_PATH/report.sh" PUBLISHED "${{ steps.publish.outputs.version }}" || true
         exit 0
 
-    # Accepted but not published (HTTP 202): the run is green, and the card in the store should say
-    # it waits rather than "building". A store that does not know this status yet answers 400 — said
-    # as a warning, because the package itself went through.
-    - name: Tell the store it was submitted
+    # Taken but not published (HTTP 202): the run is green, and the card in the store should say the
+    # version waits (SUBMITTED) — or, when the store stopped it, why (FAILED) — rather than "building".
+    # A store that does not know SUBMITTED yet answers 400: said as a warning, never a failure.
+    - name: Tell the store it was taken
       if: success() && steps.publish.outputs.submitted == 'true'
       shell: bash
       env:
@@ -484,10 +510,15 @@ runs:
         API: ${{ inputs.api-base }}
         ACTION_REF: ${{ github.action_ref }}
         VERSION: ${{ steps.publish.outputs.version }}
+        STATUS: ${{ steps.publish.outputs.report-status }}
+        FAILED_STEP: ${{ steps.publish.outputs.report-status == 'FAILED' && 'Publish' || '' }}
+        FAILURE_LOG: ${{ steps.publish.outputs.report-reason }}
         REPORT_WARN: 'true'
       run: |
-        # Through bash: report.sh carries no executable bit in git, which only a Windows runner forgives.
-        bash "$GITHUB_ACTION_PATH/report.sh" SUBMITTED "$VERSION" || true
+        # Called the way every other report here is called. report.sh has no executable bit in git, so
+        # on a Linux runner none of them runs (`|| true` keeps the step green) — as before this step
+        # existed; a SUBMITTED that alone landed would be the store's word no later run replaces.
+        "$GITHUB_ACTION_PATH/report.sh" "${STATUS:-SUBMITTED}" "$VERSION" || true
         exit 0
 
     - name: Tell the store it failed
