@@ -46,6 +46,26 @@ inputs:
     description: Publish as a licensed (paid) extension.
     required: false
     default: 'false'
+  price:
+    description: >
+      Perpetual licence price in US dollars, e.g. 350 or 349.99. Optional; a price makes the version
+      paid. It is the starting price: the store puts it on the card when the version is approved, and
+      only if the card has no perpetual price yet, so a price changed later under My published stays.
+      Empty is silence, not "take it off sale".
+    required: false
+    default: ''
+  monthly-price:
+    description: >
+      Monthly subscription price in US dollars. Same rules as `price`. The yearly plan is ten monthly
+      payments and needs no input of its own.
+    required: false
+    default: ''
+  trial-days:
+    description: >
+      Trial length in days, within the store's bounds. Goes on the card only if the card has no trial
+      length of its own yet; empty keeps the store's default.
+    required: false
+    default: ''
   category:
     description: >
       Storefront category id, e.g. operation, ai, geometry-io. Optional: left empty, the store keeps
@@ -160,11 +180,30 @@ runs:
         STAMP_VERSION: ${{ inputs.version }}
         LICENSED: ${{ inputs.licensed }}
         CATEGORY: ${{ inputs.category }}
+        PRICE: ${{ inputs.price }}
+        MONTHLY_PRICE: ${{ inputs.monthly-price }}
+        TRIAL_DAYS: ${{ inputs.trial-days }}
         DRY_RUN: ${{ inputs.dry-run }}
         API: ${{ inputs.api-base }}
       run: |
         set -euo pipefail
         TOKEN="$(printf '%s' "$TOKEN" | sed 's/^[[:space:]]*Bearer[[:space:]]*//')"
+
+        # Price and trial are checked for form before anything is uploaded: a typo found after the
+        # upload costs the author a whole run. The amounts themselves the store checks.
+        PRICE="$(tr -d '[:space:]$' <<< "$PRICE")"
+        MONTHLY_PRICE="$(tr -d '[:space:]$' <<< "$MONTHLY_PRICE")"
+        TRIAL_DAYS="$(tr -d '[:space:]' <<< "$TRIAL_DAYS")"
+        for pair in "price:$PRICE" "monthly-price:$MONTHLY_PRICE"; do
+          if [ -n "${pair#*:}" ] && ! [[ "${pair#*:}" =~ ^[0-9]+(\.[0-9]{1,2})?$ ]]; then
+            echo "::error::${pair%%:*} must be US dollars like 350 or 349.99, got '${pair#*:}'."
+            exit 1
+          fi
+        done
+        if [ -n "$TRIAL_DAYS" ] && ! [[ "$TRIAL_DAYS" =~ ^[0-9]+$ ]]; then
+          echo "::error::trial-days must be a whole number of days, got '$TRIAL_DAYS'."
+          exit 1
+        fi
 
         # Auth: a store token when given; otherwise the workflow's own GitHub OIDC token
         # (trusted publishing — works once this repository is bound to the package).
@@ -365,12 +404,20 @@ runs:
         # the store keeps whatever the extension already had, so an extension sorted by hand does not
         # fall back to the default on the next tag push. The list of ids is at
         # <api-base>/categories (JSON) or /categories/guide.md (prose).
+        # Price and trial: sent only when the workflow names them, in cents as the store counts. They
+        # are the card's starting terms — the store fills only what the card lacks, so prices changed
+        # under My published survive the next tag push, and silence never takes a card off sale.
         payload="$(jq -cn --arg p "$pkgId" --arg v "$ver" --arg u "$upl" --argjson l "$licensed_json" \
                    --arg r "${GITHUB_REPOSITORY:-}" --arg s "${GITHUB_SHA:-}" --arg c "${CATEGORY:-}" \
+                   --arg pp "$PRICE" --arg mp "$MONTHLY_PRICE" --arg td "$TRIAL_DAYS" \
                    '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}
                     + (if $r != "" then {sourceRepo:$r} else {} end)
                     + (if $s != "" then {sourceSha:$s} else {} end)
-                    + (if $c != "" then {category:$c} else {} end)')"
+                    + (if $c != "" then {category:$c} else {} end)
+                    + ([ (if $pp != "" then {kind:"PERPETUAL", amountCents:($pp|tonumber*100|round)} else empty end),
+                         (if $mp != "" then {kind:"MONTHLY", amountCents:($mp|tonumber*100|round)} else empty end) ]
+                       | if length > 0 then {prices:.} else {} end)
+                    + (if $td != "" then {trialDays:($td|tonumber)} else {} end)')"
         pub="$(call POST "$API/extensions" -H 'Content-Type: application/json' --data-binary "$payload")"
         # 202: accepted, but not in the feed yet — it waits for a moderator (state SUBMITTED) or to be
         # signed (PENDING/SIGNED). That is a success with no card, so no slug to ask for. Anything else

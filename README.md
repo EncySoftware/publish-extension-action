@@ -49,6 +49,9 @@ Or with a package you packed yourself:
 | `pack-cli` | no | — | Optional: pack on the runner with the ENCY CLI instead of server-side packing. |
 | `version` | no | keep file value | Version stamped into the package (folder mode; typically from the git tag). |
 | `licensed` | no | `false` | Publish as a paid extension. |
+| `price` | no | — | Perpetual licence price in US dollars, e.g. `350`. Makes the version paid. See [Price](#price). |
+| `monthly-price` | no | — | Monthly subscription price in US dollars. The yearly plan is ten monthly payments. |
+| `trial-days` | no | store default | Trial length in days. |
 | `dry-run` | no | `false` | Pack + server-side validation (parse-nupkg), skip the publish step. |
 | `api-base` | no | `https://apps.encycam.com/api` | Override for test environments. |
 
@@ -73,6 +76,26 @@ The store validates on the server (`parse-nupkg` → 400 otherwise):
 - `package.info.json` with `tags` containing the **`ency-extension` marker** — without it the
   catalog will not index the package;
 - `sdkVersion` in `package.info.json` drives the "minimal ENCY version" shown on the card.
+
+## Price
+
+```yaml
+- uses: EncySoftware/publish-extension-action@v1
+  with:
+    folder: src/bin/Release
+    version: ${{ env.PKG_VERSION }}
+    price: 350
+    trial-days: 30
+```
+
+`price`, `monthly-price` and `trial-days` are the card's starting terms. The store puts them on the card
+when the version is approved, and only what the card does not have yet: a price or a trial length
+changed later under **My published** stays, and the run prints a note that the card keeps its own.
+Leaving them out changes nothing, and nothing here takes a card off sale. Without any price a paid
+card installs only by trial until a price is set under My published.
+
+Selling needs your developer details with paid extensions requested, and a payout account with
+Stripe (Account → Earnings). The first paid version's approval enables paid extensions for you.
 
 ## Consents the store checks
 
