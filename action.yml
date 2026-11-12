@@ -26,6 +26,8 @@ inputs:
       Build-output folder to publish. Must be a FLAT build output: <Name>.dll +
       <Name>.settings.json + package.info.json (+ readme.md for the store card). Use
       `dotnet build`, not `dotnet publish` - publish drags all SDK dlls into the folder.
+      The one subfolder that travels is `docs`: the extension's documentation, .md pages and
+      .png/.jpg pictures, which the store shows on the extension's docs page.
       By default the files are uploaded and the STORE BACKEND packs them (no tooling
       needed on the runner); pass `pack-cli` to pack locally with the ENCY CLI instead.
     required: false
@@ -349,18 +351,38 @@ runs:
           fi
           echo "== uploading build output for server-side packing: $FOLDER =="
           ids=()
+          paths=()
           for f in "$FOLDER"/*; do
             [ -f "$f" ] || continue
             up="$(call POST "$API/storage/upload" -F "file=@$f")"
             ids+=( "$(jq -r '.uploadId' <<< "$up")" )
+            paths+=( "$(basename "$f")" )
             echo "  uploaded $(basename "$f")"
           done
           if [ ${#ids[@]} -eq 0 ]; then
             echo "::error::no files in $FOLDER"
             exit 1
           fi
-          payload="$(jq -cn --arg v "$STAMP_VERSION" \
-                     '$ARGS.positional as $ids | {fileUploadIds:$ids} + (if $v != "" then {version:$v} else {} end)' \
+          # The docs folder keeps its folders: each page and picture goes with its path, and the store packs
+          # it under docs/. Only what the store shows is uploaded; anything else there is named and left out.
+          if [ -d "$FOLDER/docs" ]; then
+            while IFS= read -r -d '' f; do
+              rel="${f#"$FOLDER"/}"
+              rel="${rel#/}"
+              case "$(tr '[:upper:]' '[:lower:]' <<< "$rel")" in
+                *.md|*.png|*.jpg|*.jpeg)
+                  up="$(call POST "$API/storage/upload" -F "file=@$f")"
+                  ids+=( "$(jq -r '.uploadId' <<< "$up")" )
+                  paths+=( "$rel" )
+                  echo "  uploaded $rel" ;;
+                *)
+                  echo "::warning::$rel is neither a page (.md) nor a picture (.png, .jpg) - the store does not show it, so it is not uploaded" ;;
+              esac
+            done < <(find "$FOLDER/docs" -type f -print0 | sort -z)
+          fi
+          paths_json="$(printf '%s\n' "${paths[@]}" | jq -R . | jq -cs .)"
+          payload="$(jq -cn --arg v "$STAMP_VERSION" --argjson paths "$paths_json" \
+                     '$ARGS.positional as $ids | {fileUploadIds:$ids, paths:$paths} + (if $v != "" then {version:$v} else {} end)' \
                      --args "${ids[@]}")"
           echo "== pack-folder (the backend builds the package) =="
           parsed="$(call POST "$API/extensions/pack-folder" -H 'Content-Type: application/json' --data-binary "$payload")"

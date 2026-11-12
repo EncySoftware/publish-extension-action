@@ -45,7 +45,7 @@ Or with a package you packed yourself:
 |---|---|---|---|
 | `token` | yes | — | Store bearer token (Keycloak realm `licsys`). Keep it in a repo secret. |
 | `nupkg` | no* | — | Path/glob of a ready `.nupkg` (newest match wins). |
-| `folder` | no* | — | Flat build-output folder: `<Name>.dll` + `<Name>.settings.json` + `package.info.json`. The backend packs it (server-side). Use `dotnet build` — `dotnet publish` drags SDK dlls into the output. |
+| `folder` | no* | — | Flat build-output folder: `<Name>.dll` + `<Name>.settings.json` + `package.info.json`. The backend packs it (server-side). Use `dotnet build` — `dotnet publish` drags SDK dlls into the output. The one subfolder that travels is `docs`: the extension's documentation, `.md` pages and `.png`/`.jpg` pictures, shown on the extension's docs page. |
 | `pack-cli` | no | — | Optional: pack on the runner with the ENCY CLI instead of server-side packing. |
 | `version` | no | keep file value | Version stamped into the package (folder mode; typically from the git tag). |
 | `licensed` | no | `false` | Publish as a paid extension. |
