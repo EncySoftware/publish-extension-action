@@ -52,6 +52,7 @@ Or with a package you packed yourself:
 | `price` | no | — | Perpetual licence price in US dollars, e.g. `350`. Makes the version paid. See [Price](#price). |
 | `monthly-price` | no | — | Monthly subscription price in US dollars. The yearly plan is ten monthly payments. |
 | `trial-days` | no | store default | Trial length in days. |
+| `summary` | no | — | The card's short description, 40–160 characters. See [Short description](#short-description). |
 | `dry-run` | no | `false` | Pack + server-side validation (parse-nupkg), skip the publish step. |
 | `api-base` | no | `https://apps.encycam.com/api` | Override for test environments. |
 
@@ -76,6 +77,23 @@ The store validates on the server (`parse-nupkg` → 400 otherwise):
 - `package.info.json` with `tags` containing the **`ency-extension` marker** — without it the
   catalog will not index the package;
 - `sdkVersion` in `package.info.json` drives the "minimal ENCY version" shown on the card.
+
+## Short description
+
+```yaml
+- uses: EncySoftware/publish-extension-action@v1
+  with:
+    folder: src/bin/Release
+    version: ${{ env.PKG_VERSION }}
+    summary: Mills a pocket of any shape in one operation, roughing and finishing included.
+```
+
+The line under the extension's name in the catalog. 40–160 characters and a few words about what the
+extension does: not the name alone, not a template line, not all capitals. One that does not fit is
+refused, and the error carries the store's draft to start from. The card keeps it through later
+versions, so it is enough to send it once and again when it changes. Left out on a card that never had
+one, the card shows the package's description cut at a word to 160 characters, and the run prints a
+note saying so.
 
 ## Price
 

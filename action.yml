@@ -75,6 +75,15 @@ inputs:
       it. The ids are at <api-base>/categories, and in prose at <api-base>/categories/guide.md.
     required: false
     default: ''
+  summary:
+    description: >
+      The card's short description: the line under the name in the catalog, 40-160 characters, a few
+      words about what the extension does. The card keeps it through later versions that send none.
+      One that does not fit is refused, with the store's draft in the error. Empty is silence: a card
+      that never had one shows the package's description cut at a word to 160 characters, and the run
+      prints a note saying so.
+    required: false
+    default: ''
   dry-run:
     description: Pack and validate on the server (parse-nupkg), but skip the publish step.
     required: false
@@ -182,6 +191,7 @@ runs:
         STAMP_VERSION: ${{ inputs.version }}
         LICENSED: ${{ inputs.licensed }}
         CATEGORY: ${{ inputs.category }}
+        SUMMARY: ${{ inputs.summary }}
         PRICE: ${{ inputs.price }}
         MONTHLY_PRICE: ${{ inputs.monthly-price }}
         TRIAL_DAYS: ${{ inputs.trial-days }}
@@ -429,13 +439,17 @@ runs:
         # Price and trial: sent only when the workflow names them, in cents as the store counts. They
         # are the card's starting terms — the store fills only what the card lacks, so prices changed
         # under My published survive the next tag push, and silence never takes a card off sale.
+        # Summary: the store calls the card's short description `description`; sent only when the
+        # workflow names one, so the card keeps the one it was given before.
         payload="$(jq -cn --arg p "$pkgId" --arg v "$ver" --arg u "$upl" --argjson l "$licensed_json" \
                    --arg r "${GITHUB_REPOSITORY:-}" --arg s "${GITHUB_SHA:-}" --arg c "${CATEGORY:-}" \
+                   --arg sm "${SUMMARY:-}" \
                    --arg pp "$PRICE" --arg mp "$MONTHLY_PRICE" --arg td "$TRIAL_DAYS" \
                    '{packageId:$p, version:$v, nupkgUploadId:$u, licensed:$l}
                     + (if $r != "" then {sourceRepo:$r} else {} end)
                     + (if $s != "" then {sourceSha:$s} else {} end)
                     + (if $c != "" then {category:$c} else {} end)
+                    + (if $sm != "" then {description:$sm} else {} end)
                     + ([ (if $pp != "" then {kind:"PERPETUAL", amountCents:($pp|tonumber*100|round)} else empty end),
                          (if $mp != "" then {kind:"MONTHLY", amountCents:($mp|tonumber*100|round)} else empty end) ]
                        | if length > 0 then {prices:.} else {} end)
